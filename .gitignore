@@ -1,8 +1,8 @@
 checkpoint/*
 log/*
 results/*
-data/*
-*.png
+data/test/B100/*
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
