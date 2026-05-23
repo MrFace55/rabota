@@ -6,7 +6,7 @@ from .luts import HDLUT, HDBLUT
 
 
 class HKLUT(nn.Module): 
-    def __init__(self, msb_weights, lsb_weights, msb='hdb', lsb='hd', upscale=2):
+    def __init__(self, msb_weights, lsb_weights, msb='hdb', lsb='hd', upscale=1):
         super(HKLUT, self).__init__()
         self.upscale = upscale
         self.bit_mask = '11110000'
@@ -37,7 +37,10 @@ class HKLUT(nn.Module):
 
         LSB_out = self.lsb_lut(img_lr_lsb)/255.
 
-        img_out = MSB_out + LSB_out + nn.Upsample(scale_factor=self.upscale, mode='nearest')(img_lr)
+        if self.upscale > 1:
+            img_out = MSB_out + LSB_out + nn.Upsample(scale_factor=self.upscale, mode='nearest')(img_lr)
+        else:
+            img_out = MSB_out + LSB_out + img_lr  # residual connection for upscale=1 (color correction)
         
         return torch.clamp(img_out, 0, 1)
 

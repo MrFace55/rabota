@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class HDLUT(nn.Module):
-    def __init__(self, h_weight, d_weight, L, upscale=2):
+    def __init__(self, h_weight, d_weight, L, upscale=1):
         super(HDLUT, self).__init__()
         self.h_weight = h_weight
         self.d_weight = d_weight
@@ -31,16 +31,19 @@ class HDLUT(nn.Module):
                     img_a = img_in[:,:, 0:0+H, 0:0+W]
                     img_b = img_in[:,:, 1:1+H, 1:1+W]
 
-
-                tmp = weight[img_a.flatten()*self.L + img_b.flatten()].reshape((img_a.shape[0], img_a.shape[1], img_a.shape[2], img_a.shape[3], self.upscale, self.upscale))   
-                tmp = torch.permute(tmp, (0, 1, 2, 4, 3, 5)).reshape((img_a.shape[0], img_a.shape[1], img_a.shape[2] * self.upscale, img_a.shape[3] * self.upscale))
+                if self.upscale > 1:
+                    tmp = weight[img_a.flatten()*self.L + img_b.flatten()].reshape((img_a.shape[0], img_a.shape[1], img_a.shape[2], img_a.shape[3], self.upscale, self.upscale))   
+                    tmp = torch.permute(tmp, (0, 1, 2, 4, 3, 5)).reshape((img_a.shape[0], img_a.shape[1], img_a.shape[2] * self.upscale, img_a.shape[3] * self.upscale))
+                else:
+                    # For upscale=1, no reshaping needed - output size equals input size
+                    tmp = weight[img_a.flatten()*self.L + img_b.flatten()].reshape((img_a.shape[0], img_a.shape[1], img_a.shape[2], img_a.shape[3]))
                 out += torch.rot90(tmp, 4 - r, [2,3])
 
         return out/self.avg_factor
 
         
 class HDBLUT(nn.Module):
-    def __init__(self, h_weight, d_weight, b_weight, L, upscale=2):
+    def __init__(self, h_weight, d_weight, b_weight, L, upscale=1):
         super(HDBLUT, self).__init__()
         self.h_weight = h_weight
         self.d_weight = d_weight
@@ -76,9 +79,14 @@ class HDBLUT(nn.Module):
                     img_c = img_in[:, :, 2:2+H, 1:1+W]
                     weight = self.b_weight
 
-                tmp = weight[img_a.flatten()*self.L*self.L + img_b.flatten()*self.L + img_c.flatten()
-                             ].reshape((img_a.shape[0], img_a.shape[1], img_a.shape[2], img_a.shape[3], self.upscale, self.upscale))   
-                tmp = torch.permute(tmp, (0, 1, 2, 4, 3, 5)).reshape((img_a.shape[0], img_a.shape[1], img_a.shape[2] * self.upscale, img_a.shape[3] * self.upscale))
+                if self.upscale > 1:
+                    tmp = weight[img_a.flatten()*self.L*self.L + img_b.flatten()*self.L + img_c.flatten()
+                                 ].reshape((img_a.shape[0], img_a.shape[1], img_a.shape[2], img_a.shape[3], self.upscale, self.upscale))   
+                    tmp = torch.permute(tmp, (0, 1, 2, 4, 3, 5)).reshape((img_a.shape[0], img_a.shape[1], img_a.shape[2] * self.upscale, img_a.shape[3] * self.upscale))
+                else:
+                    # For upscale=1, no reshaping needed - output size equals input size
+                    tmp = weight[img_a.flatten()*self.L*self.L + img_b.flatten()*self.L + img_c.flatten()
+                                 ].reshape((img_a.shape[0], img_a.shape[1], img_a.shape[2], img_a.shape[3]))
                 out += torch.rot90(tmp, 4 - r, [2,3])
 
         return out/self.avg_factor

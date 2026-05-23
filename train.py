@@ -12,7 +12,7 @@ import argparse
 from torch.utils.tensorboard import SummaryWriter
 
 from models import *
-from data import Provider, SRBenchmark
+from data import Provider, SRBenchmark, degrade_image
 from utils import PSNR, _rgb2ycbcr, seed_everything
 
 
@@ -33,8 +33,8 @@ def parse_args():
     parser.add_argument("--i-save", type=int, default=2000,
                         help="save checkpoints every N iteration")
 
-    parser.add_argument("--upscale", nargs='+', type=int, default=[2, 2],
-                        help="upscaling factors")
+    parser.add_argument("--upscale", nargs='+', type=int, default=[1],
+                        help="upscaling factors (1 for color correction)")
     parser.add_argument("--crop-size", type=int, default=48,
                         help="input LR training patch size")
     parser.add_argument("--batch-size", type=int, default=32,
@@ -46,6 +46,14 @@ def parse_args():
     parser.add_argument('--lr', type=float, default=5e-4, help="initial learning rate")
     parser.add_argument('--wd', type=float, default=0,  help='weight decay')
 
+    parser.add_argument('--degradation', type=str, default='gaussian',
+                        choices=['gaussian', 'jpeg', 'mixed', 'none'],
+                        help='degradation type for color correction')
+    parser.add_argument('--noise-std', type=float, default=25,
+                        help='Gaussian noise standard deviation')
+    parser.add_argument('--jpeg-quality', type=int, default=75,
+                        help='JPEG compression quality')
+    
     parser.add_argument('--msb', type=str, default='hdb', choices=['hdb', 'hd'])
     parser.add_argument('--lsb', type=str, default='hd', choices=['hdb', 'hd'])
     parser.add_argument('--act-fn', type=str, default='relu', choices=['relu', 'gelu', 'leakyrelu', 'starrelu'])
@@ -53,7 +61,8 @@ def parse_args():
     args = parser.parse_args()
 
     factors = 'x'.join([str(s) for s in args.upscale])
-    args.exp_name = "msb:{}-lsb:{}-act:{}-nf:{}-{}".format(args.msb, args.lsb, args.act_fn, args.n_filters, factors)
+    args.exp_name = "msb:{}-lsb:{}-act:{}-nf:{}-{}-deg:{}".format(
+        args.msb, args.lsb, args.act_fn, args.n_filters, factors, args.degradation)
 
     act_fn_dict = {'relu': nn.ReLU, 'gelu': nn.GELU, 'leakyrelu': nn.LeakyReLU, 'starrelu': StarReLU}
     args.act_fn = act_fn_dict[args.act_fn]
@@ -114,10 +123,15 @@ if __name__ == "__main__":
     if torch.cuda.device_count() > 1:
         models = [nn.DataParallel(model) for model in models]
     
+    # Prepare degradation parameters
+    degradation_params = {'sigma': args.noise_std, 'quality': args.jpeg_quality}
+    
     # Training dataset
-    train_loader = Provider(args.batch_size, args.n_workers, sr_scale, args.train_dir, args.crop_size)
+    train_loader = Provider(args.batch_size, args.n_workers, sr_scale, args.train_dir, 
+                           args.crop_size, degradation=args.degradation, 
+                           degradation_params=degradation_params)
 
-    # Validation dataset
+    # Validation dataset - for color correction we use same scale (1)
     valid_loader = SRBenchmark(args.val_dir, scale=sr_scale)
     valid_datasets = ['Set5']
 

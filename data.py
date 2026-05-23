@@ -9,9 +9,44 @@ from torch.utils.data import Dataset, DataLoader
 from utils import modcrop
 
 
+def add_gaussian_noise(img: np.ndarray, sigma: float = 25) -> np.ndarray:
+    """Add Gaussian noise to image."""
+    noise = np.random.randn(*img.shape) * sigma
+    return np.clip(img + noise, 0, 255).astype(np.uint8)
+
+
+def add_jpeg_compression(img: np.ndarray, quality: int = 75) -> np.ndarray:
+    """Add JPEG compression artifacts to image."""
+    pil_img = Image.fromarray(img.astype(np.uint8))
+    buffer = Image.BytesIO() if hasattr(Image, 'BytesIO') else None
+    if buffer is None:
+        from io import BytesIO
+        buffer = BytesIO()
+    pil_img.save(buffer, format='JPEG', quality=quality)
+    buffer.seek(0)
+    return np.array(Image.open(buffer))
+
+
+def degrade_image(img: np.ndarray, degradation: str = 'gaussian', **kwargs) -> np.ndarray:
+    """Apply degradation to image."""
+    if degradation == 'gaussian':
+        return add_gaussian_noise(img, sigma=kwargs.get('sigma', 25))
+    elif degradation == 'jpeg':
+        return add_jpeg_compression(img, quality=kwargs.get('quality', 75))
+    elif degradation == 'mixed':
+        import random
+        if random.random() < 0.5:
+            return add_gaussian_noise(img, sigma=kwargs.get('sigma', 25))
+        else:
+            return add_jpeg_compression(img, quality=kwargs.get('quality', 75))
+    return img  # no degradation
+
+
 class Provider(object):
-    def __init__(self, batch_size, num_workers, scale, path, patch_size):
-        self.data = DIV2K(scale, path, patch_size)
+    def __init__(self, batch_size, num_workers, scale, path, patch_size, 
+                 degradation='none', degradation_params=None):
+        self.data = DIV2K(scale, path, patch_size, degradation=degradation, 
+                         degradation_params=degradation_params)
         self.batch_size = batch_size
         self.num_workers = num_workers
 
@@ -49,12 +84,15 @@ class Provider(object):
 
 
 class DIV2K(Dataset):
-    def __init__(self, scale, path, patch_size, rigid_aug=True):
+    def __init__(self, scale, path, patch_size, rigid_aug=True, 
+                 degradation='none', degradation_params=None):
         super(DIV2K, self).__init__()
         self.scale = scale
         self.sz = patch_size
         self.rigid_aug = rigid_aug
         self.path = path
+        self.degradation = degradation
+        self.degradation_params = degradation_params if degradation_params is not None else {}
         self.file_list = [str(i).zfill(4)
                           for i in range(1, 801)]  # TODO:use both train and valid (901)
 
@@ -66,12 +104,16 @@ class DIV2K(Dataset):
         self.hr_ims = np.load(self.hr_cache, allow_pickle=True).item()
         print("HR image cache from:", self.hr_cache)
 
-        self.lr_cache = os.path.join(path, "cache_lr_x{}.npy".format(self.scale))
-        if not os.path.exists(self.lr_cache):
-            self.cache_lr()
-            print("LR image cache to:", self.lr_cache)
-        self.lr_ims = np.load(self.lr_cache, allow_pickle=True).item()
-        print("LR image cache from:", self.lr_cache)
+        # For color correction (upscale=1), we don't need LR cache - we generate degraded from HR
+        if self.scale == 1:
+            self.lr_ims = self.hr_ims  # Use HR as base, will apply degradation on-the-fly
+        else:
+            self.lr_cache = os.path.join(path, "cache_lr_x{}.npy".format(self.scale))
+            if not os.path.exists(self.lr_cache):
+                self.cache_lr()
+                print("LR image cache to:", self.lr_cache)
+            self.lr_ims = np.load(self.lr_cache, allow_pickle=True).item()
+            print("LR image cache from:", self.lr_cache)
 
     def cache_lr(self):
         lr_dict = dict()
@@ -90,16 +132,28 @@ class DIV2K(Dataset):
     def __getitem__(self, _dump):
         key = random.choice(self.file_list)
         lb = self.hr_ims[key]
-        im = self.lr_ims[key]
+        
+        # For color correction (scale=1), generate degraded image from HR on-the-fly
+        if self.scale == 1:
+            im = lb.copy()  # Start with HR image
+            if self.degradation != 'none':
+                im = degrade_image(im, self.degradation, **self.degradation_params)
+        else:
+            im = self.lr_ims[key]
 
         shape = im.shape
         i = random.randint(0, shape[0] - self.sz)
         j = random.randint(0, shape[1] - self.sz)
         # c = random.choice([0, 1, 2])
 
-        lb = lb[i * self.scale:i * self.scale + self.sz * self.scale,
-             j * self.scale:j * self.scale + self.sz * self.scale, :]
-        im = im[i:i + self.sz, j:j + self.sz, :]
+        # For scale=1, both input and output have the same size
+        if self.scale == 1:
+            lb = lb[i:i + self.sz, j:j + self.sz, :]
+            im = im[i:i + self.sz, j:j + self.sz, :]
+        else:
+            lb = lb[i * self.scale:i * self.scale + self.sz * self.scale,
+                 j * self.scale:j * self.scale + self.sz * self.scale, :]
+            im = im[i:i + self.sz, j:j + self.sz, :]
 
         if self.rigid_aug:
             if random.uniform(0, 1) < 0.5:

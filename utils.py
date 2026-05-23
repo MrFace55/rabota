@@ -14,6 +14,24 @@ def seed_everything(seed: int):
     torch.backends.cudnn.benchmark = True
 
 
+def delta_e_ciede2000(rgb1: np.ndarray, rgb2: np.ndarray) -> float:
+    """Calculate ΔE CIEDE2000 color difference between two RGB images."""
+    from skimage.color import rgb2lab, deltaE_ciede2000
+    
+    # Ensure inputs are in [0, 255] range and float type
+    if rgb1.max() <= 1.0:
+        rgb1 = rgb1 * 255.0
+    if rgb2.max() <= 1.0:
+        rgb2 = rgb2 * 255.0
+    
+    # Convert to LAB color space
+    lab1 = rgb2lab(rgb1.astype(np.float32) / 255.0)
+    lab2 = rgb2lab(rgb2.astype(np.float32) / 255.0)
+    
+    # Calculate ΔE CIEDE2000
+    return deltaE_ciede2000(lab1, lab2).mean()
+
+
 def remove_module(old_state_dict):
     new_state_dict = OrderedDict()
 
