@@ -63,16 +63,12 @@ def parse_args():
     parser.add_argument('--lsb', type=str, default='hd', choices=['hdb', 'hd', 'hdt'])
     parser.add_argument('--act-fn', type=str, default='relu', choices=['relu', 'gelu', 'leakyrelu', 'starrelu'])
     parser.add_argument('--n-filters', type=int, default=64, help="number of filters in intermediate layers")
-    
-    # Flag to use new implementation (-1 files)
-    parser.add_argument('--use-new-impl', action='store_true', help='Use new implementation (hklut_1.py, luts_1.py)')
     args = parser.parse_args()
 
     factors = 'x'.join([str(s) for s in args.upscale])
     # Создаем имя эксперимента
-    impl_suffix = '-new' if args.use_new_impl else ''
-    raw_exp_name = "msb:{}-lsb:{}-act:{}-nf:{}-{}-deg:{}{}".format(
-        args.msb, args.lsb, args.act_fn, args.n_filters, factors, args.degradation, impl_suffix)
+    raw_exp_name = "msb:{}-lsb:{}-act:{}-nf:{}-{}-deg:{}".format(
+        args.msb, args.lsb, args.act_fn, args.n_filters, factors, args.degradation)
 
     # Сохраняем оригинальное имя для логов внутри файла, но используем безопасное для путей
     args.exp_name = raw_exp_name
@@ -81,13 +77,9 @@ def parse_args():
     act_fn_dict = {'relu': nn.ReLU, 'gelu': nn.GELU, 'leakyrelu': nn.LeakyReLU, 'starrelu': StarReLU}
     args.act_fn = act_fn_dict[args.act_fn]
 
-    # Import model class based on flag
-    if args.use_new_impl:
-        from models.hklut_1 import HKLUT as HKNet  # Note: file should be named hklut_1.py or import adjusted
-        print("Using NEW implementation (hklut-1.py with HDTBLUT support)")
-    else:
-        from models import HKNet
-        print("Using OLD implementation (hklut.py)")
+    # Always use new implementation with HDTBLUT support
+    from models import HKNet
+    print("Using NEW implementation (hklut_1.py, luts_1.py, hknet_1.py, units_1.py with HDTBLUT/HDTUnit support)")
 
     return args
 

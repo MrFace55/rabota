@@ -15,8 +15,8 @@ def parse_args():
                         help="Checkpoint directory")
     parser.add_argument("--upscale", nargs='+', type=int, default=[2, 2],
                         help="upscaling factors")
-    parser.add_argument('--msb', type=str, default='hdb', choices=['hdb', 'hd'])
-    parser.add_argument('--lsb', type=str, default='hd', choices=['hdb', 'hd'])
+    parser.add_argument('--msb', type=str, default='hdb', choices=['hdb', 'hd', 'hdt'])
+    parser.add_argument('--lsb', type=str, default='hd', choices=['hdb', 'hd', 'hdt'])
     parser.add_argument('--act-fn', type=str, default='relu', choices=['relu', 'gelu', 'leakyrelu', 'starrelu'])
     parser.add_argument('--n-filters', type=int, default=64, help="number of filters in intermediate layers")
     args = parser.parse_args()
@@ -38,7 +38,7 @@ def get_input_tensor(bits, base_steps, n_pixels=3):
     input_tensor=torch.cat([index_nD[i].flatten().unsqueeze(1) for i in range(len(index_nD))], 1).unsqueeze(1)
     return input_tensor # N, 1, n_pixels
    
-pixel_dict = {'hdb': 3, 'hd': 2} 
+pixel_dict = {'hdb': 3, 'hd': 2, 'hdt': 4} 
 
 if __name__ == "__main__":
     args = parse_args()
