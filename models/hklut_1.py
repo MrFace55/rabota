@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from utils import bit_plane_slicing, decode_bit_mask
-from .luts import HDLUT, HDBLUT, HDTBLUT
+from .luts_1 import HDLUT, HDBLUT, HDTBLUT
 
 
 class HKLUT(nn.Module): 
