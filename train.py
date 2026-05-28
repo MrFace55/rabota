@@ -86,7 +86,7 @@ def parse_args():
         from models.hknet_1 import HKNet
         print("Using NEW implementation (hknet_1.py with HDTUnit support)")
     else:
-        from models import HKNet
+        from models.hknet import HKNet
         print("Using OLD implementation (hknet.py)")
 
     return args
