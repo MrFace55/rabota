@@ -83,11 +83,11 @@ def parse_args():
 
     # Import model class based on flag
     if args.use_new_impl:
-        from models.hklut_1 import HKLUT as HKNet  # Note: file should be named hklut_1.py or import adjusted
-        print("Using NEW implementation (hklut-1.py with HDTBLUT support)")
+        from models.hknet_1 import HKNet
+        print("Using NEW implementation (hknet_1.py with HDTUnit support)")
     else:
         from models import HKNet
-        print("Using OLD implementation (hklut.py)")
+        print("Using OLD implementation (hknet.py)")
 
     return args
 
