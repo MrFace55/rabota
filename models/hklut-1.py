@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from utils import bit_plane_slicing, decode_bit_mask
-from .luts import HDLUT, HDBLUT
+from .luts import HDLUT, HDBLUT, HDTBLUT
 
 
 class HKLUT(nn.Module): 
@@ -13,12 +13,24 @@ class HKLUT(nn.Module):
         self.msb_bits, self.lsb_bits, self.msb_step, self.lsb_step = decode_bit_mask(self.bit_mask)
 
         # MSB
-        msb_lut = HDLUT if msb=='hd' else HDBLUT
+        if msb=='hd':
+            msb_lut = HDLUT 
+        elif msb=='hdb': 
+            msb_lut = HDBLUT
+        else:
+            msb_lut = HDTBLUT
+
         self.msb_lut = msb_lut(*msb_weights, 2**self.msb_bits, upscale=upscale)
 
 
         # LSB
-        lsb_lut = HDLUT if lsb=='hd' else HDBLUT
+        if lsb=='hd':
+            lsb_lut = HDLUT 
+        elif lsb=='hdb': 
+            lsb_lut = HDBLUT
+        else:
+            lsb_lut = HDTBLUT        
+
         self.lsb_lut = lsb_lut(*lsb_weights, 2**self.lsb_bits, upscale=upscale)
 
 
@@ -34,13 +46,9 @@ class HKLUT(nn.Module):
 
         # lsb
         img_lr_lsb = torch.floor_divide(img_lr_lsb, self.lsb_step)
-
         LSB_out = self.lsb_lut(img_lr_lsb)/255.
 
-        if self.upscale > 1:
-            img_out = MSB_out + LSB_out + nn.Upsample(scale_factor=self.upscale, mode='nearest')(img_lr)
-        else:
-            img_out = MSB_out + LSB_out + img_lr  # residual connection for upscale=1 (color correction)
+        img_out = MSB_out + LSB_out + nn.Upsample(scale_factor=self.upscale, mode='nearest')(img_lr)
         
         return torch.clamp(img_out, 0, 1)
 

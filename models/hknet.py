@@ -4,7 +4,7 @@ from .units import *
 from utils import bit_plane_slicing, floor_func
 
 class HKNet(nn.Module):
-    def __init__(self, msb='hdb', lsb='hd', nf=64, upscale=2, act=nn.ReLU):
+    def __init__(self, msb='hdb', lsb='hd', nf=64, upscale=1, act=nn.ReLU):
         super(HKNet, self).__init__()
         self.msb = msb
         self.lsb = lsb
@@ -65,6 +65,9 @@ class HKNet(nn.Module):
         LSB_out = torch.clamp(LSB_out, -1, 1)
 
         output = MSB_out + LSB_out
-        output += nn.Upsample(scale_factor=self.upscale, mode='nearest')(x)
+        if self.upscale > 1:
+            output += nn.Upsample(scale_factor=self.upscale, mode='nearest')(x)
+        else:
+            output += x  # residual connection for upscale=1 (color correction)
 
         return torch.clamp(output, 0, 1)
