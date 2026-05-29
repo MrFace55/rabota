@@ -160,7 +160,6 @@ if __name__ == "__main__":
     ## Prepare directories
     if not os.path.isdir('checkpoint'):
         os.mkdir('checkpoint')
-    # Директория создается внутри SaveCheckpoint, но можно создать и здесь
     if not os.path.isdir('checkpoint/{}'.format(args.safe_exp_name)):
         os.mkdir('checkpoint/{}'.format(args.safe_exp_name))
     if not os.path.isdir('log'):
@@ -193,7 +192,9 @@ if __name__ == "__main__":
         x = batch_L
         for model in models:
             x = model(x)
-        pred = torch.clamp(x, 0, 1)
+
+        # 🔧 ИЗМЕНЕНИЕ 1: Заменяем clamp на сигмоиду для гладких градиентов
+        pred = torch.sigmoid(x)
         loss_G = F.mse_loss(pred, batch_H)
 
         # Update
@@ -257,17 +258,19 @@ if __name__ == "__main__":
                         for model in models:
                             x = model(x)
 
+                        #  ИЗМЕНЕНИЕ 2: Применяем сигмоиду вместо клиппинга в валидации
+                        x = torch.sigmoid(x)
+
                         # Output
-                        image_out = (x).cpu().data.numpy()
-                        image_out = np.transpose(np.clip(image_out[0], 0., 1.), [1, 2, 0])  # HxWxC
-                        image_out = ((image_out) * 255).astype(np.uint8)
+                        image_out = x.cpu().data.numpy()
+                        image_out = np.transpose(image_out[0], [1, 2, 0])  # HxWxC
+                        # Сигмоида уже гарантирует [0, 1], клиппинг оставлен для безопасности при конвертации
+                        image_out = np.clip(image_out * 255.0, 0, 255).astype(np.uint8)
 
                         # PSNR on Y channel
-                        # Для upscale=1 кроп не нужен, размеры должны совпадать
                         h, w, _ = img_gt.shape
                         out_h, out_w, _ = image_out.shape
 
-                        # Небольшая страховка от расхождений в размерах на 1 пиксель
                         min_h, min_w = min(h, out_h), min(w, out_w)
 
                         psnrs.append(PSNR(_rgb2ycbcr(img_gt[:min_h, :min_w])[:, :, 0],

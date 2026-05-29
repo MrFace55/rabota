@@ -14,12 +14,12 @@ from utils import _rgb2ycbcr  # Для PSNR по яркости
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # ================= НАСТРОЙКИ =================
-WEIGHTS_PATH = './checkpoint/msb_hdb-lsb_hdb-act_relu-nf_48-1-deg_gaussian/model_G_S0_i003000.pth'
+WEIGHTS_PATH = 'C:/Users/Тёма/PycharmProjects/NIR/checkpoint/msb_hdt-lsb_hdt-act_relu-nf_48-1-deg_gaussian/model_G_S0_i005000.pth'
 DATA_DIR = './data/Set14/HR'
-SAVE_DIR = './results_comparison'
+SAVE_DIR = './results_comparison_hdtb'
 NOISE_STD = 25
-MSB = 'hdb'
-LSB = 'hdb'
+MSB = 'hdt'
+LSB = 'hdt'
 NF = 48
 UPSACLE = 1
 
