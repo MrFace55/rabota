@@ -63,16 +63,12 @@ def parse_args():
     parser.add_argument('--lsb', type=str, default='hd', choices=['hdb', 'hd', 'hdt'])
     parser.add_argument('--act-fn', type=str, default='relu', choices=['relu', 'gelu', 'leakyrelu', 'starrelu'])
     parser.add_argument('--n-filters', type=int, default=64, help="number of filters in intermediate layers")
-    
-    # Flag to use new implementation (-1 files)
-    parser.add_argument('--use-new-impl', action='store_true', help='Use new implementation (hklut_1.py, luts_1.py)')
     args = parser.parse_args()
 
     factors = 'x'.join([str(s) for s in args.upscale])
     # Создаем имя эксперимента
-    impl_suffix = '-new' if args.use_new_impl else ''
-    raw_exp_name = "msb:{}-lsb:{}-act:{}-nf:{}-{}-deg:{}{}".format(
-        args.msb, args.lsb, args.act_fn, args.n_filters, factors, args.degradation, impl_suffix)
+    raw_exp_name = "msb:{}-lsb:{}-act:{}-nf:{}-{}-deg:{}".format(
+        args.msb, args.lsb, args.act_fn, args.n_filters, factors, args.degradation)
 
     # Сохраняем оригинальное имя для логов внутри файла, но используем безопасное для путей
     args.exp_name = raw_exp_name
@@ -81,13 +77,9 @@ def parse_args():
     act_fn_dict = {'relu': nn.ReLU, 'gelu': nn.GELU, 'leakyrelu': nn.LeakyReLU, 'starrelu': StarReLU}
     args.act_fn = act_fn_dict[args.act_fn]
 
-    # Import model class based on flag
-    if args.use_new_impl:
-        from models.hklut_1 import HKLUT as HKNet  # Note: file should be named hklut_1.py or import adjusted
-        print("Using NEW implementation (hklut-1.py with HDTBLUT support)")
-    else:
-        from models import HKNet
-        print("Using OLD implementation (hklut.py)")
+    # Always use new implementation with HDTBLUT support
+    from models import HKNet
+    print("Using NEW implementation (hklut_1.py, luts_1.py, hknet_1.py, units_1.py with HDTBLUT/HDTUnit support)")
 
     return args
 
@@ -168,7 +160,6 @@ if __name__ == "__main__":
     ## Prepare directories
     if not os.path.isdir('checkpoint'):
         os.mkdir('checkpoint')
-    # Директория создается внутри SaveCheckpoint, но можно создать и здесь
     if not os.path.isdir('checkpoint/{}'.format(args.safe_exp_name)):
         os.mkdir('checkpoint/{}'.format(args.safe_exp_name))
     if not os.path.isdir('log'):
@@ -201,7 +192,9 @@ if __name__ == "__main__":
         x = batch_L
         for model in models:
             x = model(x)
-        pred = torch.clamp(x, 0, 1)
+
+        # 🔧 ИЗМЕНЕНИЕ 1: Заменяем clamp на сигмоиду для гладких градиентов
+        pred = torch.sigmoid(x)
         loss_G = F.mse_loss(pred, batch_H)
 
         # Update
@@ -265,17 +258,19 @@ if __name__ == "__main__":
                         for model in models:
                             x = model(x)
 
+                        #  ИЗМЕНЕНИЕ 2: Применяем сигмоиду вместо клиппинга в валидации
+                        x = torch.sigmoid(x)
+
                         # Output
-                        image_out = (x).cpu().data.numpy()
-                        image_out = np.transpose(np.clip(image_out[0], 0., 1.), [1, 2, 0])  # HxWxC
-                        image_out = ((image_out) * 255).astype(np.uint8)
+                        image_out = x.cpu().data.numpy()
+                        image_out = np.transpose(image_out[0], [1, 2, 0])  # HxWxC
+                        # Сигмоида уже гарантирует [0, 1], клиппинг оставлен для безопасности при конвертации
+                        image_out = np.clip(image_out * 255.0, 0, 255).astype(np.uint8)
 
                         # PSNR on Y channel
-                        # Для upscale=1 кроп не нужен, размеры должны совпадать
                         h, w, _ = img_gt.shape
                         out_h, out_w, _ = image_out.shape
 
-                        # Небольшая страховка от расхождений в размерах на 1 пиксель
                         min_h, min_w = min(h, out_h), min(w, out_w)
 
                         psnrs.append(PSNR(_rgb2ycbcr(img_gt[:min_h, :min_w])[:, :, 0],

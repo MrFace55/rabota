@@ -25,8 +25,8 @@ def parse_args():
                         help="Directory to store resulted images")
     parser.add_argument("--upscale", nargs='+', type=int, default=[2, 2],
                         help="upscaling factors")
-    parser.add_argument('--msb', type=str, default='hdb', choices=['hdb', 'hd'])
-    parser.add_argument('--lsb', type=str, default='hd', choices=['hdb', 'hd'])
+    parser.add_argument('--msb', type=str, default='hdb', choices=['hdb', 'hd', 'hdt'])
+    parser.add_argument('--lsb', type=str, default='hd', choices=['hdb', 'hd', 'hdt'])
     parser.add_argument('--act-fn', type=str, default='gelu',
                         choices=['relu', 'gelu', 'leakyrelu', 'starrelu'])
     parser.add_argument('--n-filters', type=int, default=64,
