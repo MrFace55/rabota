@@ -52,12 +52,16 @@ def parse_args():
     parser.add_argument('--wd', type=float, default=0, help='weight decay')
 
     parser.add_argument('--degradation', type=str, default='gaussian',
-                        choices=['gaussian', 'jpeg', 'mixed', 'none'],
+                        choices=['gaussian', 'blur', 'gaussian_blur', 'jpeg', 'mixed', 'mixed_with_blur', 'none'],
                         help='degradation type for color correction')
     parser.add_argument('--noise-std', type=float, default=25,
                         help='Gaussian noise standard deviation')
     parser.add_argument('--jpeg-quality', type=int, default=75,
                         help='JPEG compression quality')
+    parser.add_argument('--kernel-size', type=int, default=5,
+                        help='Gaussian blur kernel size')
+    parser.add_argument('--blur-sigma', type=float, default=0,
+                        help='Gaussian blur sigma (0 = auto)')
 
     parser.add_argument('--msb', type=str, default='hdb', choices=['hdb', 'hd', 'hdt'])
     parser.add_argument('--lsb', type=str, default='hd', choices=['hdb', 'hd', 'hdt'])
@@ -144,7 +148,12 @@ if __name__ == "__main__":
         models = [nn.DataParallel(model) for model in models]
 
     # Prepare degradation parameters
-    degradation_params = {'sigma': args.noise_std, 'quality': args.jpeg_quality}
+    degradation_params = {
+        'sigma': args.noise_std, 
+        'quality': args.jpeg_quality,
+        'kernel_size': args.kernel_size,
+        'blur_sigma': args.blur_sigma
+    }
 
     # Training dataset
     train_loader = Provider(args.batch_size, args.n_workers, sr_scale, args.train_dir,

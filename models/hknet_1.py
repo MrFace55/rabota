@@ -82,4 +82,4 @@ class HKNet(nn.Module):
         else:
             output += x  # residual connection for upscale=1 (color correction)
 
-        return torch.clamp(output, 0, 1)
+        return output

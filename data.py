@@ -4,7 +4,7 @@ import sys
 from io import BytesIO
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 from torch.utils.data import Dataset, DataLoader
 
 from utils import modcrop
@@ -14,6 +14,25 @@ def add_gaussian_noise(img: np.ndarray, sigma: float = 25) -> np.ndarray:
     """Add Gaussian noise to image."""
     noise = np.random.randn(*img.shape) * sigma
     return np.clip(img + noise, 0, 255).astype(np.uint8)
+
+
+def add_gaussian_blur(img: np.ndarray, kernel_size: int = 5, sigma: float = 0) -> np.ndarray:
+    """Add Gaussian blur to image.
+    
+    Args:
+        img: Input image (H, W, C) in uint8 format [0, 255]
+        kernel_size: Size of the Gaussian kernel (must be odd)
+        sigma: Standard deviation of Gaussian kernel. If 0, calculated from kernel_size.
+    
+    Returns:
+        Blurred image in uint8 format [0, 255]
+    """
+    pil_img = Image.fromarray(img.astype(np.uint8))
+    if sigma == 0:
+        # Calculate sigma from kernel_size if not provided
+        sigma = 0.3 * ((kernel_size - 1) * 0.5 - 1) + 0.8
+    blurred = pil_img.filter(ImageFilter.GaussianBlur(radius=sigma))
+    return np.array(blurred)
 
 
 def add_jpeg_compression(img: np.ndarray, quality: int = 75) -> np.ndarray:
@@ -29,11 +48,23 @@ def degrade_image(img: np.ndarray, degradation: str = 'gaussian', **kwargs) -> n
     """Apply degradation to image."""
     if degradation == 'gaussian':
         return add_gaussian_noise(img, sigma=kwargs.get('sigma', 25))
+    elif degradation == 'blur':
+        return add_gaussian_blur(img, kernel_size=kwargs.get('kernel_size', 5), sigma=kwargs.get('blur_sigma', 0))
+    elif degradation == 'gaussian_blur':
+        return add_gaussian_blur(img, kernel_size=kwargs.get('kernel_size', 5), sigma=kwargs.get('blur_sigma', 0))
     elif degradation == 'jpeg':
         return add_jpeg_compression(img, quality=kwargs.get('quality', 75))
     elif degradation == 'mixed':
         if random.random() < 0.5:
             return add_gaussian_noise(img, sigma=kwargs.get('sigma', 25))
+        else:
+            return add_jpeg_compression(img, quality=kwargs.get('quality', 75))
+    elif degradation == 'mixed_with_blur':
+        choice = random.random()
+        if choice < 0.33:
+            return add_gaussian_noise(img, sigma=kwargs.get('sigma', 25))
+        elif choice < 0.66:
+            return add_gaussian_blur(img, kernel_size=kwargs.get('kernel_size', 5), sigma=kwargs.get('blur_sigma', 0))
         else:
             return add_jpeg_compression(img, quality=kwargs.get('quality', 75))
     return img  # no degradation
