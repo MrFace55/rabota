@@ -119,7 +119,8 @@ if __name__ == "__main__":
     degradation_params = {
         'sigma': args.noise_std,
         'kernel_size': args.kernel_size,
-        'blur_sigma': args.blur_sigma
+        'blur_sigma': args.blur_sigma,
+        'seed': 42  # Фиксированный seed для воспроизводимости
     }
 
     for fname in files:
@@ -129,8 +130,6 @@ if __name__ == "__main__":
         img_gt = np.array(Image.open(os.path.join(args.data_dir, fname)).convert('RGB'))
 
         # 2. Генерация деградации (Noisy/Blurred/etc.)
-        # Фиксируем seed для воспроизводимости
-        np.random.seed(42)
         img_degraded = degrade_image(img_gt, args.degradation, **degradation_params)
 
         # 3. Инференс модели
