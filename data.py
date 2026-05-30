@@ -60,15 +60,10 @@ def degrade_image(img: np.ndarray, degradation: str = 'gaussian', **kwargs) -> n
         else:
             return add_jpeg_compression(img, quality=kwargs.get('quality', 75))
     elif degradation == 'mixed_with_blur':
-        # Используем numpy random для воспроизводимости
-        rng = np.random.default_rng(kwargs.get('seed', None))
-        choice = rng.random()
-        if choice < 0.33:
-            return add_gaussian_noise(img, sigma=kwargs.get('sigma', 25))
-        elif choice < 0.66:
-            return add_gaussian_blur(img, kernel_size=kwargs.get('kernel_size', 5), sigma=kwargs.get('blur_sigma', 0))
-        else:
-            return add_jpeg_compression(img, quality=kwargs.get('quality', 75))
+        # ВСЕГДА применяем оба типа: сначала блюр, потом шум
+        img = add_gaussian_blur(img, kernel_size=kwargs.get('kernel_size', 5), sigma=kwargs.get('blur_sigma', 0))
+        img = add_gaussian_noise(img, sigma=kwargs.get('sigma', 25))
+        return img
     return img  # no degradation
 
 
