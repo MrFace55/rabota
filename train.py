@@ -6,8 +6,10 @@ import torch.optim as optim
 import numpy as np
 import time
 import os
+import json
 from tqdm import tqdm
 import argparse
+import matplotlib.pyplot as plt
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -50,6 +52,8 @@ def parse_args():
                         help="number of training iterations")
     parser.add_argument('--lr', type=float, default=5e-4, help="initial learning rate")
     parser.add_argument('--wd', type=float, default=0, help='weight decay')
+    parser.add_argument('--scheduler', type=str, default='cosine', choices=['none', 'step', 'cosine'],
+                        help='Learning rate scheduler policy')
 
     parser.add_argument('--degradation', type=str, default='gaussian',
                         choices=['gaussian', 'blur', 'gaussian_blur', 'jpeg', 'mixed', 'mixed_with_blur', 'none'],
@@ -132,7 +136,13 @@ if __name__ == "__main__":
     opt_G = optim.Adam([{'params': list(filter(lambda p: p.requires_grad, model.parameters()))} for model in models],
                        lr=args.lr, betas=(0.9, 0.999), weight_decay=args.wd, eps=1e-8, amsgrad=False)
 
-    scheduler = optim.lr_scheduler.MultiStepLR(opt_G, milestones=[100000, 150000], gamma=0.1)
+    ## Learning Rate Scheduler
+    if args.scheduler == 'step':
+        scheduler = optim.lr_scheduler.MultiStepLR(opt_G, milestones=[100000, 150000], gamma=0.1)
+    elif args.scheduler == 'cosine':
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(opt_G, T_max=args.train_iter, eta_min=1e-7)
+    else:
+        scheduler = None
 
     ## Load saved params
     if args.start_iter > 0:
@@ -181,6 +191,22 @@ if __name__ == "__main__":
 
     ### TRAINING
     best_psnr = 0.0
+    
+    # Create logs directory with safe experiment name
+    log_dir = os.path.join('logs', args.safe_exp_name)
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Metrics storage
+    metrics = {
+        'iterations': [],
+        'loss_pixel': [],
+        'psnr_valid': {},
+        'learning_rate': []
+    }
+    
+    for j in range(len(valid_datasets)):
+        metrics['psnr_valid'][valid_datasets[j]] = []
+    
     for i in tqdm(range(args.start_iter + 1, args.train_iter + 1)):
 
         for model in models:
@@ -216,12 +242,22 @@ if __name__ == "__main__":
         # For monitoring
         accum_samples += args.batch_size
         l_accum[0] += loss_G.item()
+        
+        # Get current learning rate
+        current_lr = opt_G.param_groups[0]['lr']
 
         ## Show information
         if i % args.i_display == 0:
             writer.add_scalar('loss_Pixel', l_accum[0] / args.i_display, i)
-            print("{}| Iter:{:6d}, Sample:{:6d}, GPixel:{:.2e}, dT:{:.4f}, rT:{:.4f}".format(
-                args.exp_name, i, accum_samples, l_accum[0] / args.i_display, dT / args.i_display, rT / args.i_display))
+            writer.add_scalar('learning_rate', current_lr, i)
+            
+            # Store metrics
+            metrics['iterations'].append(i)
+            metrics['loss_pixel'].append(l_accum[0] / args.i_display)
+            metrics['learning_rate'].append(current_lr)
+            
+            print("{}| Iter:{:6d}, Sample:{:6d}, GPixel:{:.2e}, LR:{:.2e}, dT:{:.4f}, rT:{:.4f}".format(
+                args.exp_name, i, accum_samples, l_accum[0] / args.i_display, current_lr, dT / args.i_display, rT / args.i_display))
             l_accum = [0., 0., 0.]
             dT = 0.
             rT = 0.
@@ -294,9 +330,96 @@ if __name__ == "__main__":
 
                         print('Iter {} | Dataset {} | AVG Val PSNR: {:.2f}'.format(i, valid_datasets[j], mean_psnr))
                         writer.add_scalar('PSNR_valid/{}'.format(valid_datasets[j]), mean_psnr, i)
+                        
+                        # Store PSNR metrics
+                        metrics['psnr_valid'][valid_datasets[j]].append({'iter': i, 'psnr': mean_psnr})
                     else:
                         print(f'Iter {i} | Dataset {valid_datasets[j]} | No images processed')
 
                     writer.flush()
-
+    
+    # Save metrics to JSON
+    metrics_path = os.path.join(log_dir, 'metrics.json')
+    with open(metrics_path, 'w') as f:
+        json.dump(metrics, f, indent=2)
+    print(f"Metrics saved to {metrics_path}")
+    
+    # Generate training plots
+    generate_training_plots(metrics, log_dir, args.exp_name)
+    
     print(f'Best PSNR: {best_psnr}')
+
+
+def generate_training_plots(metrics, log_dir, exp_name):
+    """Generate training plots from metrics"""
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle(f'Training Metrics - {exp_name}', fontsize=16)
+    
+    # Plot 1: Loss curve
+    ax = axes[0, 0]
+    if metrics['iterations'] and metrics['loss_pixel']:
+        ax.plot(metrics['iterations'], metrics['loss_pixel'], 'b-', linewidth=2, label='Pixel Loss')
+        ax.set_xlabel('Iteration')
+        ax.set_ylabel('Loss')
+        ax.set_title('Training Loss')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+    
+    # Plot 2: Learning Rate curve
+    ax = axes[0, 1]
+    if metrics['iterations'] and metrics['learning_rate']:
+        ax.plot(metrics['iterations'], metrics['learning_rate'], 'g-', linewidth=2, label='Learning Rate')
+        ax.set_xlabel('Iteration')
+        ax.set_ylabel('LR')
+        ax.set_title('Learning Rate Schedule')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        ax.set_yscale('log')
+    
+    # Plot 3: PSNR curves for all datasets
+    ax = axes[1, 0]
+    colors = ['r', 'm', 'c', 'y', 'k']
+    for idx, (dataset, psnr_data) in enumerate(metrics['psnr_valid'].items()):
+        if psnr_data:
+            iters = [p['iter'] for p in psnr_data]
+            psnrs = [p['psnr'] for p in psnr_data]
+            color = colors[idx % len(colors)]
+            ax.plot(iters, psnrs, f'{color}o-', linewidth=2, markersize=4, label=f'{dataset} PSNR')
+    
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel('PSNR (dB)')
+    ax.set_title('Validation PSNR')
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    
+    # Plot 4: Combined Loss and PSNR (dual axis)
+    ax = axes[1, 1]
+    if metrics['iterations'] and metrics['loss_pixel']:
+        ax.plot(metrics['iterations'], metrics['loss_pixel'], 'b-', linewidth=2, label='Pixel Loss')
+        ax.set_xlabel('Iteration')
+        ax.set_ylabel('Loss', color='b')
+        ax.tick_params(axis='y', labelcolor='b')
+        ax.grid(True, alpha=0.3)
+        
+        ax2 = ax.twinx()
+        for idx, (dataset, psnr_data) in enumerate(metrics['psnr_valid'].items()):
+            if psnr_data:
+                iters = [p['iter'] for p in psnr_data]
+                psnrs = [p['psnr'] for p in psnr_data]
+                color = colors[idx % len(colors)]
+                ax2.plot(iters, psnrs, f'{color}s--', linewidth=2, markersize=4, label=f'{dataset} PSNR')
+        
+        ax2.set_ylabel('PSNR (dB)', color='r')
+        ax2.tick_params(axis='y', labelcolor='r')
+        ax2.set_title('Loss vs PSNR')
+        
+        # Combined legend
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+    
+    plt.tight_layout()
+    plot_path = os.path.join(log_dir, 'training_plots.png')
+    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Training plots saved to {plot_path}")
