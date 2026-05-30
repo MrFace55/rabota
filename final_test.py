@@ -146,10 +146,10 @@ if __name__ == "__main__":
             output_tensor = model(input_tensor)
             infer_time = (time.time() - start_time) * 1000  # мс
 
-        # 4. Пост-процессинг выхода - ИСПОЛЬЗУЕМ SIGMOID
+        # 4. Пост-процессинг выхода
+        # Модель уже возвращает результат в диапазоне [0, 1] с clamp
         out_np = output_tensor.cpu().squeeze(0).permute(1, 2, 0).numpy()
-        out_np = torch.sigmoid(torch.from_numpy(out_np)).numpy()  # Применяем sigmoid
-        out_np = np.clip(out_np * 255.0, 0, 255).astype(np.uint8)
+        out_np = np.clip(out_np * 255.0, 0, 255).astype(np.uint8)  # Масштабируем до [0, 255]
         img_restored = out_np
 
         # 5. Расчет метрик

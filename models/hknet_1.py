@@ -77,9 +77,16 @@ class HKNet(nn.Module):
         LSB_out = torch.clamp(LSB_out, -1, 1)
 
         output = MSB_out + LSB_out
+        
+        # Применяем sigmoid к предсказанной разнице (residual)
+        # Сигмоид дает диапазон (0, 1), масштабируем его к (-1, 1) для residual
+        output = torch.sigmoid(output) * 2.0 - 1.0
+        
+        # Добавляем residual connection
         if self.upscale > 1:
             output += nn.Upsample(scale_factor=self.upscale, mode='nearest')(x)
         else:
             output += x  # residual connection for upscale=1 (color correction)
 
-        return output
+        # Ограничиваем финальный результат в [0, 1]
+        return torch.clamp(output, 0, 1)

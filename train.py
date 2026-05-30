@@ -202,8 +202,8 @@ if __name__ == "__main__":
         for model in models:
             x = model(x)
 
-        # 🔧 ИЗМЕНЕНИЕ 1: Заменяем clamp на сигмоиду для гладких градиентов
-        pred = torch.sigmoid(x)
+        # Модель уже возвращает результат с residual connection и clamp
+        pred = x
         loss_G = F.mse_loss(pred, batch_H)
 
         # Update
@@ -267,13 +267,12 @@ if __name__ == "__main__":
                         for model in models:
                             x = model(x)
 
-                        #  ИЗМЕНЕНИЕ 2: Применяем сигмоиду вместо клиппинга в валидации
-                        x = torch.sigmoid(x)
+                        # Модель уже возвращает результат с residual connection и clamp
+                        x = x
 
                         # Output
                         image_out = x.cpu().data.numpy()
                         image_out = np.transpose(image_out[0], [1, 2, 0])  # HxWxC
-                        # Сигмоида уже гарантирует [0, 1], клиппинг оставлен для безопасности при конвертации
                         image_out = np.clip(image_out * 255.0, 0, 255).astype(np.uint8)
 
                         # PSNR on Y channel
