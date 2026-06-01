@@ -5,6 +5,7 @@ from PIL import Image
 import time
 from skimage.metrics import structural_similarity as ssim
 from skimage.color import rgb2lab, deltaE_ciede2000
+import argparse
 
 # Импорт ваших локальных модулей
 from models import HKNet
@@ -13,18 +14,30 @@ from utils import _rgb2ycbcr  # Для PSNR по яркости
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-# ================= НАСТРОЙКИ =================
-WEIGHTS_PATH = 'C:/Users/Тёма/PycharmProjects/NIR/checkpoint/msb_hdt-lsb_hdt-act_relu-nf_48-1-deg_gaussian/model_G_S0_i005000.pth'
-DATA_DIR = './data/Set14/HR'
-SAVE_DIR = './results_comparison_hdtb'
-NOISE_STD = 25
-MSB = 'hdt'
-LSB = 'hdt'
-NF = 48
-UPSACLE = 1
 
-
-# =============================================
+def parse_args():
+    parser = argparse.ArgumentParser("Final Test with Sigmoid and Blur Support")
+    parser.add_argument("--weights-path", type=str, 
+                        default='checkpoint/msb_hdt-lsb_hdt-act_relu-nf_48-1-deg_gaussian/model_G_S0_i005000.pth',
+                        help="Path to model weights")
+    parser.add_argument("--data-dir", type=str, default='./data/Set14/HR',
+                        help="Directory with test images (GT)")
+    parser.add_argument("--save-dir", type=str, default='./results_comparison',
+                        help="Directory to save comparison results")
+    parser.add_argument("--noise-std", type=float, default=25,
+                        help="Gaussian noise standard deviation")
+    parser.add_argument("--degradation", type=str, default='gaussian',
+                        choices=['gaussian', 'blur', 'gaussian_blur', 'jpeg', 'mixed_with_blur', 'none'],
+                        help="Degradation type for testing")
+    parser.add_argument("--kernel-size", type=int, default=5,
+                        help="Gaussian blur kernel size")
+    parser.add_argument("--blur-sigma", type=float, default=0,
+                        help="Gaussian blur sigma (0 = auto)")
+    parser.add_argument("--msb", type=str, default='hdt', choices=['hdb', 'hd', 'hdt'])
+    parser.add_argument("--lsb", type=str, default='hdt', choices=['hdb', 'hd', 'hdt'])
+    parser.add_argument("--nf", type=int, default=48, help="Number of filters")
+    parser.add_argument("--upscale", type=int, default=1, help="Upscale factor")
+    return parser.parse_args()
 
 def calculate_psnr(img1, img2):
     """PSNR по каналу Y (яркость)"""
@@ -66,94 +79,104 @@ def create_comparison_grid(gt, noisy, restored, filename):
 
     # Добавим подписи (опционально, здесь просто сохраняем сетку)
     pil_grid = Image.fromarray(grid)
-    pil_grid.save(os.path.join(SAVE_DIR, f"comp_{filename}"))
+    pil_grid.save(os.path.join(args.save_dir, f"comp_{filename}"))
 
 
-print(f"Loading model from {WEIGHTS_PATH}...")
-model = HKNet(msb=MSB, lsb=LSB, nf=NF, upscale=UPSACLE, act=torch.nn.ReLU)
+if __name__ == "__main__":
+    args = parse_args()
+    
+    print(f"Loading model from {args.weights_path}...")
+    model = HKNet(msb=args.msb, lsb=args.lsb, nf=args.nf, upscale=args.upscale, act=torch.nn.ReLU)
+    
+    # Загрузка весов с обработкой возможных ошибок ключей
+    state_dict = torch.load(args.weights_path, map_location=device, weights_only=False)
+    try:
+        model.load_state_dict(state_dict)
+    except RuntimeError:
+        # Убираем префикс 'module.' если он есть
+        new_state = {k.replace('module.', ''): v for k, v in state_dict.items()}
+        model.load_state_dict(new_state)
+    
+    model.to(device).eval()
+    print("Model loaded successfully.")
+    
+    # Подготовка папки результатов
+    os.makedirs(args.save_dir, exist_ok=True)
 
-# Загрузка весов с обработкой возможных ошибок ключей
-state_dict = torch.load(WEIGHTS_PATH, map_location=device, weights_only=False)
-try:
-    model.load_state_dict(state_dict)
-except RuntimeError:
-    # Убираем префикс 'module.' если он есть
-    new_state = {k.replace('module.', ''): v for k, v in state_dict.items()}
-    model.load_state_dict(new_state)
+    # Поиск изображений
+    files = [f for f in os.listdir(args.data_dir) if f.endswith('.png') or f.endswith('.jpg')]
+    files.sort()
 
-model.to(device).eval()
-print("Model loaded successfully.")
+    if not files:
+        print(f"ERROR: No images found in {args.data_dir}")
+        exit()
 
-# Подготовка папки результатов
-os.makedirs(SAVE_DIR, exist_ok=True)
+    print(f"Processing {len(files)} images from {args.data_dir}...\n")
 
-# Поиск изображений
-files = [f for f in os.listdir(DATA_DIR) if f.endswith('.png') or f.endswith('.jpg')]
-files.sort()
+    metrics = {'psnr': [], 'ssim': [], 'delta_e': [], 'time': []}
 
-if not files:
-    print(f"ERROR: No images found in {DATA_DIR}")
-    exit()
+    # Prepare degradation parameters
+    degradation_params = {
+        'sigma': args.noise_std,
+        'kernel_size': args.kernel_size,
+        'blur_sigma': args.blur_sigma,
+        'seed': 42  # Фиксированный seed для воспроизводимости
+    }
 
-print(f"Processing {len(files)} images from {DATA_DIR}...\n")
+    for fname in files:
+        base_name = os.path.splitext(fname)[0]
 
-metrics = {'psnr': [], 'ssim': [], 'delta_e': [], 'time': []}
+        # 1. Загрузка GT
+        img_gt = np.array(Image.open(os.path.join(args.data_dir, fname)).convert('RGB'))
 
-for fname in files:
-    base_name = os.path.splitext(fname)[0]
+        # 2. Генерация деградации (Noisy/Blurred/etc.)
+        img_degraded = degrade_image(img_gt, args.degradation, **degradation_params)
 
-    # 1. Загрузка GT
-    img_gt = np.array(Image.open(os.path.join(DATA_DIR, fname)).convert('RGB'))
+        # 3. Инференс модели
+        input_tensor = torch.from_numpy(np.transpose(img_degraded.astype(np.float32) / 255.0, [2, 0, 1])).unsqueeze(0).to(
+            device)
 
-    # 2. Генерация шума (Noisy)
-    # Фиксируем seed для воспроизводимости картинки шума
-    np.random.seed(42)
-    img_noisy = degrade_image(img_gt, 'gaussian', sigma=NOISE_STD)
+        with torch.no_grad():
+            # Прогрев GPU для первого кадра (чтобы не портить статистику времени)
+            if fname == files[0]:
+                _ = model(input_tensor)
 
-    # 3. Инференс модели
-    input_tensor = torch.from_numpy(np.transpose(img_noisy.astype(np.float32) / 255.0, [2, 0, 1])).unsqueeze(0).to(
-        device)
+            start_time = time.time()
+            output_tensor = model(input_tensor)
+            infer_time = (time.time() - start_time) * 1000  # мс
 
-    with torch.no_grad():
-        # Прогрев GPU для первого кадра (чтобы не портить статистику времени)
-        if fname == files[0]:
-            _ = model(input_tensor)
+        # 4. Пост-процессинг выхода
+        # Модель уже возвращает результат в диапазоне [0, 1] с clamp
+        out_np = output_tensor.cpu().squeeze(0).permute(1, 2, 0).numpy()
+        out_np = np.clip(out_np * 255.0, 0, 255).astype(np.uint8)  # Масштабируем до [0, 255]
+        img_restored = out_np
 
-        start_time = time.time()
-        output_tensor = model(input_tensor)
-        infer_time = (time.time() - start_time) * 1000  # мс
+        # 5. Расчет метрик
+        psnr_val = calculate_psnr(img_gt, img_restored)
+        ssim_val = calculate_ssim(img_gt, img_restored)
+        de_val = calculate_delta_e(img_gt, img_restored)
 
-    # 4. Пост-процессинг выхода
-    out_np = output_tensor.cpu().squeeze(0).permute(1, 2, 0).numpy()
-    out_np = np.clip(out_np * 255.0, 0, 255).astype(np.uint8)
-    img_restored = out_np
+        metrics['psnr'].append(psnr_val)
+        metrics['ssim'].append(ssim_val)
+        metrics['delta_e'].append(de_val)
+        metrics['time'].append(infer_time)
 
-    # 5. Расчет метрик
-    psnr_val = calculate_psnr(img_gt, img_restored)
-    ssim_val = calculate_ssim(img_gt, img_restored)
-    de_val = calculate_delta_e(img_gt, img_restored)
+        print(f"{fname}:")
+        print(f"  PSNR: {psnr_val:.2f} dB | SSIM: {ssim_val:.4f} | ΔE: {de_val:.2f} | Time: {infer_time:.2f}ms")
 
-    metrics['psnr'].append(psnr_val)
-    metrics['ssim'].append(ssim_val)
-    metrics['delta_e'].append(de_val)
-    metrics['time'].append(infer_time)
+        # 6. Сохранение картинки сравнения
+        create_comparison_grid(img_gt, img_degraded, img_restored, fname)
 
-    print(f"{fname}:")
-    print(f"  PSNR: {psnr_val:.2f} dB | SSIM: {ssim_val:.4f} | ΔE: {de_val:.2f} | Time: {infer_time:.2f}ms")
-
-    # 6. Сохранение картинки сравнения
-    create_comparison_grid(img_gt, img_noisy, img_restored, fname)
-
-# Итоговая таблица
-print("\n" + "=" * 60)
-print("FINAL RESULTS (AVERAGE)")
-print("=" * 60)
-print(f"Dataset: Set14 ({len(files)} images)")
-print(f"Degradation: Gaussian Noise (σ={NOISE_STD})")
-print("-" * 60)
-print(f"Average PSNR:  {np.mean(metrics['psnr']):.2f} dB")
-print(f"Average SSIM:  {np.mean(metrics['ssim']):.4f}")
-print(f"Average ΔE:    {np.mean(metrics['delta_e']):.2f}")
-print(f"Avg Inference: {np.mean(metrics['time']):.2f} ms")
-print("=" * 60)
-print(f"Comparison images saved to: {os.path.abspath(SAVE_DIR)}")
+    # Итоговая таблица
+    print("\n" + "=" * 60)
+    print("FINAL RESULTS (AVERAGE)")
+    print("=" * 60)
+    print(f"Dataset: Set14 ({len(files)} images)")
+    print(f"Degradation: {args.degradation} (noise_std={args.noise_std}, kernel_size={args.kernel_size})")
+    print("-" * 60)
+    print(f"Average PSNR:  {np.mean(metrics['psnr']):.2f} dB")
+    print(f"Average SSIM:  {np.mean(metrics['ssim']):.4f}")
+    print(f"Average ΔE:    {np.mean(metrics['delta_e']):.2f}")
+    print(f"Avg Inference: {np.mean(metrics['time']):.2f} ms")
+    print("=" * 60)
+    print(f"Comparison images saved to: {os.path.abspath(args.save_dir)}")
